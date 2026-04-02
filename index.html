@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IP & DNS 检测器</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --bg2: #0f1526;
+    --bg3: #151c32;
+    --border: #1e2d4a;
+    --accent: #00d4ff;
+    --accent2: #7b61ff;
+    --accent3: #00ff9d;
+    --text: #c8d8f0;
+    --text-dim: #5a7299;
+    --text-bright: #e8f0ff;
+    --red: #ff4d6d;
+    --yellow: #ffd166;
+    --font-mono: 'JetBrains Mono', monospace;
+    --font-body: 'Noto Sans SC', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.025) 1px, transparent 1px);
+    background-size: 60px 60px;
+    animation: gridMove 25s linear infinite;
+    pointer-events: none; z-index: 0;
+  }
+  @keyframes gridMove { to { transform: translateY(60px); } }
+  body::after {
+    content: '';
+    position: fixed; top: -20%; left: 50%; transform: translateX(-50%);
+    width: 800px; height: 400px;
+    background: radial-gradient(ellipse, rgba(0,212,255,0.05) 0%, transparent 70%);
+    pointer-events: none; z-index: 0;
+  }
+
+  .container { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; padding: 48px 24px 80px; }
+
+  /* ── Header ── */
+  header { text-align: center; margin-bottom: 48px; }
+  .logo { display: inline-flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+  .logo-icon {
+    width: 44px; height: 44px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; box-shadow: 0 0 24px rgba(0,212,255,0.3);
+  }
+  .logo-text { font-family: var(--font-mono); font-size: 14px; color: var(--accent); letter-spacing: 3px; text-transform: uppercase; }
+  h1 { font-size: clamp(26px, 5vw, 44px); font-weight: 700; color: var(--text-bright); letter-spacing: -1px; line-height: 1.2; margin-bottom: 10px; }
+  h1 span { background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { font-size: 14px; color: var(--text-dim); font-weight: 300; }
+
+  /* ── 原理说明区 ── */
+  .principle-section {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 32px;
+    margin-bottom: 32px;
+    position: relative;
+    overflow: hidden;
+  }
+  .principle-section::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, var(--accent2), var(--accent), var(--accent3));
+  }
+  .section-title {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 13px; font-family: var(--font-mono);
+    color: var(--accent); letter-spacing: 2px; text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+  .section-title::after {
+    content: ''; flex: 1; height: 1px;
+    background: linear-gradient(90deg, var(--border), transparent);
+  }
+
+  /* 流程图 */
+  .flow {
+    display: flex; align-items: stretch; gap: 0;
+    flex-wrap: nowrap; overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .flow-step {
+    display: flex; flex-direction: column; align-items: center;
+    flex: 1; min-width: 110px;
+  }
+  .flow-box {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 10px;
+    text-align: center;
+    width: 100%;
+    transition: border-color 0.3s;
+  }
+  .flow-box:hover { border-color: rgba(0,212,255,0.3); }
+  .flow-icon { font-size: 22px; margin-bottom: 6px; }
+  .flow-label { font-size: 11px; color: var(--text-bright); font-weight: 500; line-height: 1.3; }
+  .flow-sub { font-size: 10px; color: var(--text-dim); margin-top: 4px; line-height: 1.4; }
+  .flow-arrow {
+    display: flex; align-items: center; padding: 0 2px;
+    color: var(--accent); font-size: 18px; flex-shrink: 0;
+    align-self: center; margin-top: -20px;
+  }
+  @media (max-width: 600px) {
+    .flow { flex-direction: column; gap: 0; }
+    .flow-step { flex-direction: row; min-width: unset; gap: 10px; }
+    .flow-box { text-align: left; display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
+    .flow-icon { font-size: 18px; margin-bottom: 0; flex-shrink: 0; }
+    .flow-arrow { transform: rotate(90deg); padding: 2px 0; margin-top: 0; margin-left: 20px; }
+  }
+
+  /* 说明文字列表 */
+  .principle-desc {
+    margin-top: 20px;
+    border-top: 1px solid var(--border);
+    padding-top: 18px;
+  }
+  .desc-item {
+    display: flex; gap: 14px; align-items: flex-start;
+    padding: 9px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    font-size: 13px; color: var(--text);
+    line-height: 1.6;
+  }
+  .desc-item:last-child { border-bottom: none; }
+  .desc-num {
+    flex-shrink: 0;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: rgba(0,212,255,0.1);
+    border: 1px solid rgba(0,212,255,0.3);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono); font-size: 11px; color: var(--accent);
+    margin-top: 1px;
+  }
+  .desc-text { flex: 1; }
+  .desc-text b { color: var(--text-bright); font-weight: 500; }
+  .desc-text code {
+    font-family: var(--font-mono); font-size: 11px;
+    background: rgba(0,212,255,0.08); border: 1px solid rgba(0,212,255,0.15);
+    border-radius: 4px; padding: 1px 6px; color: var(--accent);
+  }
+
+  /* 局限性提示 */
+  .limit-box {
+    margin-top: 16px;
+    background: rgba(255,209,102,0.05);
+    border: 1px solid rgba(255,209,102,0.18);
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 12px; color: var(--yellow);
+    line-height: 1.7;
+    display: flex; gap: 10px;
+  }
+  .limit-box b { font-weight: 600; }
+
+  /* ── 状态栏 ── */
+  .status-bar {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    margin-bottom: 32px;
+    font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);
+  }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent3); box-shadow: 0 0 8px var(--accent3);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  .status-dot.loading { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
+  .status-dot.error   { background: var(--red);    box-shadow: 0 0 8px var(--red); animation: none; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.6;transform:scale(.85)} }
+
+  /* ── DNS 进度条 ── */
+  .dns-status {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px 20px; margin-bottom: 20px;
+    display: flex; align-items: center; gap: 14px;
+    font-size: 12px; color: var(--text-dim); font-family: var(--font-mono);
+  }
+  .dns-progress { flex: 1; height: 3px; background: var(--bg3); border-radius: 2px; overflow: hidden; }
+  .dns-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border-radius: 2px; width: 0%;
+    transition: width 0.4s ease;
+  }
+
+  /* ── 结果卡片 ── */
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  @media (max-width: 600px) { .cards { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 16px; padding: 24px 26px;
+    box-shadow: 0 0 40px rgba(0,212,255,0.04);
+    transition: border-color 0.3s, box-shadow 0.3s;
+    position: relative; overflow: hidden;
+  }
+  .card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(0,212,255,0.25), transparent);
+    opacity: 0; transition: opacity 0.3s;
+  }
+  .card:hover { border-color: rgba(0,212,255,0.18); box-shadow: 0 0 36px rgba(0,212,255,0.08); }
+  .card:hover::before { opacity: 1; }
+  .card-type { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+  .card-icon { width: 34px; height: 34px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 17px; flex-shrink: 0; }
+  .card-icon.ip  { background: rgba(0,212,255,0.1); }
+  .card-icon.dns { background: rgba(123,97,255,0.1); }
+  .card-label { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); letter-spacing: 2px; text-transform: uppercase; }
+  .card-title { font-size: 12px; color: var(--text-bright); font-weight: 500; margin-top: 2px; }
+  .ip-value {
+    font-family: var(--font-mono); font-size: clamp(18px, 3.5vw, 26px);
+    font-weight: 700; color: var(--text-bright);
+    letter-spacing: -0.5px; margin-bottom: 14px; word-break: break-all;
+  }
+  .ip-value.c1 { color: var(--accent); }
+  .ip-value.c2 { color: var(--accent2); }
+  .tags { display: flex; flex-wrap: wrap; gap: 7px; }
+  .tag {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: 20px; font-size: 11px;
+    border: 1px solid; white-space: nowrap;
+  }
+  .tag.loc  { background: rgba(0,212,255,0.06);  border-color: rgba(0,212,255,0.2);  color: var(--accent);  }
+  .tag.isp  { background: rgba(123,97,255,0.06); border-color: rgba(123,97,255,0.2); color: var(--accent2); }
+  .tag.cty  { background: rgba(0,255,157,0.06);  border-color: rgba(0,255,157,0.2);  color: var(--accent3); }
+  .tag-dot  { width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: .6; }
+
+  /* 详情行 */
+  .card.detail { margin-bottom: 20px; }
+  .detail-row { display: flex; align-items: baseline; gap: 10px; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 13px; }
+  .detail-row:last-child { border-bottom: none; }
+  .detail-key { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); min-width: 90px; flex-shrink: 0; }
+  .detail-val { color: var(--text-bright); word-break: break-all; }
+
+  /* skeleton */
+  .skeleton { background: linear-gradient(90deg,var(--bg3) 25%,var(--border) 50%,var(--bg3) 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 6px; height: 32px; width: 65%; }
+  .skeleton.sm { height: 20px; width: 45%; }
+  @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+  /* 刷新按钮 */
+  .btn-refresh {
+    display: flex; align-items: center; gap: 8px; margin: 0 auto;
+    padding: 11px 30px; background: transparent;
+    border: 1px solid rgba(0,212,255,0.28); border-radius: 8px;
+    color: var(--accent); font-size: 13px; font-family: var(--font-mono);
+    cursor: pointer; transition: all 0.2s; letter-spacing: 1px;
+  }
+  .btn-refresh:hover { background: rgba(0,212,255,0.07); border-color: var(--accent); box-shadow: 0 0 18px rgba(0,212,255,0.12); }
+  .btn-refresh:disabled { opacity: .35; cursor: not-allowed; }
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { 100%{transform:rotate(360deg)} }
+
+  /* DNS 未捕获提示 */
+  .notice { background: rgba(255,209,102,0.06); border: 1px solid rgba(255,209,102,0.2); border-radius: 8px; padding: 12px 14px; font-size: 12px; color: var(--yellow); display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; line-height: 1.6; }
+
+  footer { text-align: center; margin-top: 44px; font-size: 12px; color: var(--text-dim); font-family: var(--font-mono); letter-spacing: .5px; }
+  footer a { color: var(--accent); text-decoration: none; }
+  .fade-in { animation: fadeIn .4s ease forwards; opacity: 0; }
+  @keyframes fadeIn { to { opacity: 1; } }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- ── 标题 ── -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">🌐</div>
+      <span class="logo-text">Net Probe</span>
+    </div>
+    <h1>您的 <span>IP & DNS</span> 信息</h1>
+    <p class="subtitle">实时检测您的网络出口地址与 DNS 解析器位置</p>
+  </header>
+
+
+
+  <!-- ── 检测状态 ── -->
+  <div class="status-bar">
+    <div class="status-dot loading" id="statusDot"></div>
+    <span id="statusText">正在检测中...</span>
+  </div>
+
+  <!-- DNS 探测进度 -->
+  <div class="dns-status" id="dnsStatusBar">
+    <span>🔍</span>
+    <span id="dnsStatusMsg" style="flex-shrink:0">正在发起 DNS 探测</span>
+    <div class="dns-progress">
+      <div class="dns-progress-bar" id="dnsProgressBar"></div>
+    </div>
+    <span id="dnsTimer" style="font-family:var(--font-mono);font-size:11px;flex-shrink:0">0s</span>
+  </div>
+
+  <!-- ── 结果卡片 ── -->
+  <div class="cards">
+    <!-- 客户端 IP -->
+    <div class="card">
+      <div class="card-type">
+        <div class="card-icon ip">🖥️</div>
+        <div>
+          <div class="card-label">Client IP</div>
+          <div class="card-title">您的 IP 地址</div>
+        </div>
+      </div>
+      <div class="ip-value c1" id="clientIP"><div class="skeleton"></div></div>
+      <div class="tags" id="clientTags"></div>
+    </div>
+    <!-- DNS 解析器 -->
+    <div class="card">
+      <div class="card-type">
+        <div class="card-icon dns">📡</div>
+        <div>
+          <div class="card-label">DNS Resolver</div>
+          <div class="card-title">您的 DNS 解析器</div>
+        </div>
+      </div>
+      <div class="ip-value c2" id="dnsIP"><div class="skeleton"></div></div>
+      <div class="tags" id="dnsTags"></div>
+    </div>
+  </div>
+
+  <!-- 详情 -->
+  <div class="card detail" id="detailCard" style="display:none">
+    <div id="detailRows"></div>
+  </div>
+
+  <!-- 刷新 -->
+  <div style="text-align:center">
+    <button class="btn-refresh" id="refreshBtn" onclick="runDetect()" disabled>
+      <svg id="refreshIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+      </svg>
+      重新检测
+    </button>
+  </div>
+
+    <!-- ── 工作原理 ── -->
+    <div class="principle-section" style="margin-top: 16px">
+        <div class="section-title">⚙ 工作原理</div>
+
+        <!-- 流程图 -->
+        <div class="flow">
+            <div class="flow-step">
+                <div class="flow-box">
+                    <div class="flow-icon">🖥️</div>
+                    <div class="flow-label">您的浏览器</div>
+                    <div class="flow-sub">生成随机 token<br>触发 DNS 探测</div>
+                </div>
+            </div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step">
+                <div class="flow-box">
+                    <div class="flow-icon">📡</div>
+                    <div class="flow-label">您的 DNS 解析器</div>
+                    <div class="flow-sub">运营商或自定义<br>递归查询代理</div>
+                </div>
+            </div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step">
+                <div class="flow-box">
+                    <div class="flow-icon">🏛️</div>
+                    <div class="flow-label">权威 DNS 服务器</div>
+                    <div class="flow-sub">本站服务器<br>记录解析器 IP</div>
+                </div>
+            </div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step">
+                <div class="flow-box">
+                    <div class="flow-icon">📊</div>
+                    <div class="flow-label">结果展示</div>
+                    <div class="flow-sub">IP 归属地 +<br>DNS 归属地</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 文字说明 -->
+        <div class="principle-desc">
+            <div class="desc-item">
+                <div class="desc-num">1</div>
+                <div class="desc-text">
+                    您访问本页面时，前端生成一个唯一随机 <b>token</b>（如 <code>a3fx9k</code>），
+                    并尝试加载 <code>&lt;token&gt;.{{.Domain}}</code> 下的一张 1×1 透明图片。
+                    这迫使浏览器向您的 <b>DNS 解析器</b>（通常由运营商或您手动配置）发起查询。
+                </div>
+            </div>
+            <div class="desc-item">
+                <div class="desc-num">2</div>
+                <div class="desc-text">
+                    您的 DNS 解析器在本地缓存中找不到该域名，便向互联网上的
+                    <b>根域名服务器 → 顶级域服务器 → 本站权威 DNS 服务器</b>
+                    逐级查询（递归解析）。
+                    最终查询请求打到本服务器的 <b>UDP/TCP 53 端口</b>。
+                </div>
+            </div>
+            <div class="desc-item">
+                <div class="desc-num">3</div>
+                <div class="desc-text">
+                    本站权威 DNS 服务器收到查询后，从报文中提取 <b>token</b>，
+                    并记录 <b>来源 IP</b>（即您的 DNS 解析器地址）。
+                    随后返回一个正常的 A 记录响应，TTL 设为 1 秒以防止缓存干扰下次探测。
+                </div>
+            </div>
+            <div class="desc-item">
+                <div class="desc-num">4</div>
+                <div class="desc-text">
+                    前端同时调用 <code>/api/info?token=&lt;token&gt;</code> 接口，
+                    后端返回您的 <b>客户端 IP</b>（HTTP 连接来源）以及
+                    通过 token 关联到的 <b>DNS 解析器 IP</b>，
+                    并分别查询 <a href="https://ip-api.com" target="_blank" style="color:var(--accent)">ip-api.com</a>
+                    获取地理归属信息。
+                </div>
+            </div>
+        </div>
+
+        <!-- 局限性 -->
+        <div class="limit-box">
+            <span>⚠️</span>
+            <div>
+                <b>已知局限：</b>
+                若您启用了 <b>DNS over HTTPS（DoH）</b>（如 Chrome 的"使用安全 DNS"功能），
+                浏览器会将 DNS 查询通过 HTTPS 发送至 Google/Cloudflare 等加密服务器，
+                不再经过传统 53 端口，因此本工具<b>无法捕获</b>您真实使用的 DoH 服务器地址，
+                仅能显示 DoH 提供商的出口 IP。
+                此外，部分企业内网环境会强制代理所有 DNS 请求，同样可能导致结果与预期不同。
+            </div>
+        </div>
+    </div>
+
+  <footer>
+    <p>原理：权威 DNS 服务器探针 + HTTP 反向代理获取真实 IP </p>
+  </footer>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────
+// 常量
+// ─────────────────────────────────────────────────────────────────
+const DOMAIN = "{{.Domain}}";
+
+// DNS 探测超时时间（毫秒）。
+// 超过此时间后，若仍未收到 DNS 记录，则停止轮询、展示"未能捕获"。
+const DNS_TIMEOUT_MS  = 6000;
+
+// 每次轮询 /api/info 的间隔（毫秒）。
+// 太短会频繁请求，太长会让用户等待感觉迟钝。
+const POLL_INTERVAL_MS = 800;
+
+// ─────────────────────────────────────────────────────────────────
+// 工具函数
+// ─────────────────────────────────────────────────────────────────
+
+/** 生成指定长度的随机小写字母+数字 token，用于唯一标识一次 DNS 探测。 */
+function randToken(len = 12) {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let s = '';
+  for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+
+/** 将 GeoInfo 对象转为前端 Tag 数组（{cls, text}[]）。 */
+function geoToTags(geo) {
+  if (!geo) return [];
+  const tags = [];
+  const loc = [geo.city, geo.regionName].filter(Boolean).join(' · ');
+  if (loc)       tags.push({ cls: 'loc', text: loc });
+  if (geo.country) tags.push({ cls: 'cty', text: geo.country });
+  const isp = geo.isp || geo.org;
+  if (isp)       tags.push({ cls: 'isp', text: isp });
+  return tags;
+}
+
+/** 将 Tag 数组渲染为 HTML 注入目标元素。 */
+function renderTags(el, tags) {
+  el.innerHTML = tags.map(t =>
+    `<span class="tag ${t.cls}"><span class="tag-dot"></span>${t.text}</span>`
+  ).join('');
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 核心检测流程
+// ─────────────────────────────────────────────────────────────────
+
+let timerInterval = null; // 进度条计时器
+let elapsed = 0;          // 当前已等待秒数
+
+/**
+ * runDetect — 主检测函数，完整流程：
+ *
+ *  1. 重置 UI 至"检测中"状态
+ *  2. 生成 token，通过 <img> 标签触发对 <token>.DOMAIN 的 DNS 查询
+ *     - 即使 HTTP 请求因跨域/网络问题失败，DNS 查询在网络层已发出
+ *  3. 在 DNS_TIMEOUT_MS 内轮询 /api/info?token=xxx（每 POLL_INTERVAL_MS 一次）
+ *     - 一旦 found=true 则立即停止轮询（而不是等满超时时间）
+ *     - 超时后也停止，以"未能捕获"状态结束
+ *  4. 无论结果如何，只发起一次最终的 /api/info 请求来展示客户端 IP
+ */
+async function runDetect() {
+  // ── 重置 UI ──────────────────────────────────────────────────
+  document.getElementById('refreshBtn').disabled = true;
+  document.getElementById('refreshIcon').classList.add('spin');
+  document.getElementById('statusDot').className = 'status-dot loading';
+  document.getElementById('statusText').textContent = '正在检测中...';
+  document.getElementById('clientIP').innerHTML = '<div class="skeleton"></div>';
+  document.getElementById('dnsIP').innerHTML    = '<div class="skeleton"></div>';
+  document.getElementById('clientTags').innerHTML = '';
+  document.getElementById('dnsTags').innerHTML    = '';
+  document.getElementById('detailCard').style.display = 'none';
+  document.getElementById('dnsStatusBar').style.display = 'flex';
+  document.getElementById('dnsProgressBar').style.width = '0%';
+
+  // 计时器：每秒更新显示 + 进度条（在超时前最多走到 90%，避免到达 100% 给人"卡住"感）
+  elapsed = 0;
+  clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    elapsed++;
+    document.getElementById('dnsTimer').textContent = elapsed + 's';
+    const pct = Math.min(90, elapsed * (90 / (DNS_TIMEOUT_MS / 1000)));
+    document.getElementById('dnsProgressBar').style.width = pct + '%';
+  }, 1000);
+
+  // ── 触发 DNS 探测 ─────────────────────────────────────────────
+  const token = randToken();
+  document.getElementById('dnsStatusMsg').textContent = `DNS 探测: ${token}.${DOMAIN}`;
+
+  // 通过加载图片触发 DNS 查询。
+  // 注意：这里用 http:// 而非 https://，因为浏览器对混合内容有限制，
+  // 但 DNS 查询本身在 TCP 握手之前就已发出，即使后续 HTTPS 握手失败
+  // DNS 记录也已经到达服务器。
+  const img = new Image();
+  img.src = `http://${token}.${DOMAIN}/probe.png?t=${Date.now()}`;
+  // img.onerror / img.onload 均不处理——不依赖 HTTP 响应，只需要 DNS 触发
+
+  // ── 轮询等待 DNS 捕获结果 ────────────────────────────────────
+  // 策略：在 DNS_TIMEOUT_MS 时间窗口内，每 POLL_INTERVAL_MS 轮询一次。
+  // 一旦捕获到（found=true）立即退出循环，不再继续轮询（避免冗余请求）。
+  let data = null;
+  const deadline = Date.now() + DNS_TIMEOUT_MS;
+
+  // 先等一小段时间，给 DNS 解析过程留出基本时间（通常 200~500ms）
+  await sleep(500);
+
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`/api/info?token=${token}`);
+      data = await res.json();
+
+      if (data.found) {
+        // 已捕获！立即退出轮询，不再等待超时
+        break;
+      }
+    } catch (e) {
+      console.warn('[poll] fetch error:', e);
+    }
+
+    // 未捕获，等待下一次轮询间隔
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await sleep(Math.min(POLL_INTERVAL_MS, remaining));
+  }
+
+  // 若超时仍未捕获，补一次最终请求（主要是为了拿到客户端 IP 的地理信息）
+  if (!data || !data.found) {
+    try {
+      const res = await fetch(`/api/info?token=${token}`);
+      data = await res.json();
+    } catch (e) { /* 无需处理，data 保持 null 或上次结果 */ }
+  }
+
+  // ── 停止计时，进度条推满 ─────────────────────────────────────
+  clearInterval(timerInterval);
+  document.getElementById('dnsProgressBar').style.width = '100%';
+
+  // ── 渲染结果 ─────────────────────────────────────────────────
+  if (!data) {
+    // 连 HTTP 接口都失败了
+    document.getElementById('statusDot').className = 'status-dot error';
+    document.getElementById('statusText').textContent = '检测失败，请刷新重试';
+    document.getElementById('clientIP').textContent = '请求失败';
+    document.getElementById('dnsIP').textContent = '请求失败';
+    finalize();
+    return;
+  }
+
+  // 客户端 IP
+  document.getElementById('clientIP').textContent = data.client_ip || '未知';
+  if (data.client_geo) renderTags(document.getElementById('clientTags'), geoToTags(data.client_geo));
+
+  // DNS 解析器 IP
+  if (data.found && data.resolver_ip) {
+    document.getElementById('dnsIP').textContent = data.resolver_ip;
+    document.getElementById('dnsStatusMsg').textContent = '✅ DNS 解析器已捕获';
+    if (data.resolver_geo) renderTags(document.getElementById('dnsTags'), geoToTags(data.resolver_geo));
+  } else {
+    document.getElementById('dnsIP').innerHTML = '<span style="font-size:15px;color:var(--text-dim)">未能捕获</span>';
+    document.getElementById('dnsStatusMsg').textContent = '⚠️ 超时未捕获';
+    document.getElementById('dnsTags').innerHTML = `
+      <div class="notice">
+        ℹ️ 未能捕获 DNS 解析器。可能原因：
+        您开启了 <b>DNS over HTTPS</b>（Chrome「使用安全DNS」）、
+        本地 DNS 缓存已命中、或网络策略拦截了对本域名的解析。
+        这属于正常现象，客户端 IP 信息不受影响。
+      </div>`;
+  }
+
+  // 状态指示
+  document.getElementById('statusDot').className = 'status-dot';
+  document.getElementById('statusText').textContent = '检测完成';
+
+  // 详细信息展开
+  renderDetails(data);
+  document.getElementById('detailCard').style.display = 'block';
+  document.getElementById('detailCard').classList.add('fade-in');
+
+  setTimeout(() => {
+    document.getElementById('dnsStatusBar').style.display = 'none';
+    finalize();
+  }, 600);
+}
+
+/** 恢复刷新按钮为可点击状态。 */
+function finalize() {
+  document.getElementById('refreshBtn').disabled = false;
+  document.getElementById('refreshIcon').classList.remove('spin');
+}
+
+/** 渲染详情信息表格。 */
+function renderDetails(data) {
+  const rows = [];
+  const push = (k, v) => { if (v) rows.push([k, v]); };
+  const cg = data.client_geo;
+  const rg = data.resolver_geo;
+
+  if (cg) {
+    push('您的 IP',   data.client_ip);
+    push('国家',      cg.country);
+    push('省份',      cg.regionName);
+    push('城市',      cg.city);
+    push('运营商',    cg.isp);
+    push('坐标',      cg.lat && cg.lon ? `${cg.lat.toFixed(4)}, ${cg.lon.toFixed(4)}` : null);
+  }
+  if (data.found && rg) {
+    push('DNS 服务器', data.resolver_ip);
+    push('DNS 国家',   rg.country);
+    push('DNS 省份',   rg.regionName);
+    push('DNS 城市',   rg.city);
+    push('DNS 运营商', rg.isp);
+  }
+
+  document.getElementById('detailRows').innerHTML = rows.map(([k, v]) =>
+    `<div class="detail-row">
+      <span class="detail-key">${k}</span>
+      <span class="detail-val">${v}</span>
+    </div>`
+  ).join('');
+}
+
+/** 辅助：返回一个 ms 毫秒后 resolve 的 Promise。 */
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+// 页面加载完成后自动开始检测
+runDetect();
+</script>
+</body>
+</html>
