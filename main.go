@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/oschwald/maxminddb-golang"
 )
 
 // ══════════════════════════════════════════════════════════
@@ -110,11 +112,12 @@ var logger *Logger
 
 // Config 保存服务器运行所需的全部配置，通过环境变量注入。
 type Config struct {
-	Domain   string   // 权威 DNS 区域，例如 "dns.example.com"
-	NSIP     string   // 本服务器的公网 IP
-	WebPort  string   // HTTP 监听端口，例如 ":8080"
-	DNSPort  string   // DNS 监听端口，通常为 ":53"
-	LogLevel LogLevel // 日志输出等级
+	Domain    string   // 权威 DNS 区域，例如 "dns.example.com"
+	NSIP      string   // 本服务器的公网 IP
+	WebPort   string   // HTTP 监听端口，例如 ":8080"
+	DNSPort   string   // DNS 监听端口，通常为 ":53"
+	LogLevel  LogLevel // 日志输出等级
+	GeoDBPath string   // MaxMind GeoLite2 数据库文件路径
 
 	// AllowedZones 是 DNS 查询的域名白名单。
 	// 只有 qname 属于这些区域的查询才会被处理，其他返回 REFUSED。
@@ -135,11 +138,12 @@ func buildConfig() *Config {
 		getEnv("DNS_DOMAIN", "dns.example.com"), "."))
 
 	cfg := &Config{
-		Domain:   domain,
-		NSIP:     getEnv("NS_IP", "1.2.3.4"),
-		WebPort:  getEnv("WEB_PORT", ":8080"),
-		DNSPort:  getEnv("DNS_PORT", ":53"),
-		LogLevel: parseLogLevel(getEnv("LOG_LEVEL", "info")),
+		Domain:    domain,
+		NSIP:      getEnv("NS_IP", "1.2.3.4"),
+		WebPort:   getEnv("WEB_PORT", ":8080"),
+		DNSPort:   getEnv("DNS_PORT", ":53"),
+		LogLevel:  parseLogLevel(getEnv("LOG_LEVEL", "info")),
+		GeoDBPath: getEnv("GEODB_PATH", "GeoLite2-City.mmdb"),
 	}
 
 	// 白名单始终包含主域名本身
@@ -287,8 +291,64 @@ func (s *TokenStore) Len() int {
 }
 
 // ══════════════════════════════════════════════════════════
+//  MaxMind GeoLite2 数据库
+// ══════════════════════════════════════════════════════════
+
+type geoDBReader struct {
+	db *maxminddb.Reader
+}
+
+type maxmindRecord struct {
+	Country struct {
+		ISOCode string `maxminddb:"iso_code"`
+		Names   struct {
+			ZhCN string `maxminddb:"zh-CN"`
+		} `maxminddb:"names"`
+	} `maxminddb:"country"`
+	Subdivisions []struct {
+		Names struct {
+			ZhCN string `maxminddb:"zh-CN"`
+		} `maxminddb:"names"`
+	} `maxminddb:"subdivisions"`
+	City struct {
+		Names struct {
+			ZhCN string `maxminddb:"zh-CN"`
+		} `maxminddb:"names"`
+	} `maxminddb:"city"`
+	Location struct {
+		Latitude  float64 `maxminddb:"latitude"`
+		Longitude float64 `maxminddb:"longitude"`
+	} `maxminddb:"location"`
+}
+
+var geoDB *geoDBReader
+
+func initGeoDB(path string) error {
+	db, err := maxminddb.Open(path)
+	if err != nil {
+		return fmt.Errorf("打开 MaxMind 数据库失败: %v", err)
+	}
+	geoDB = &geoDBReader{db: db}
+	logger.Info("MaxMind GeoLite2 数据库已加载: %s", path)
+	return nil
+}
+
+func closeGeoDB() {
+	if geoDB != nil && geoDB.db != nil {
+		geoDB.db.Close()
+	}
+}
+
+// ══════════════════════════════════════════════════════════
 //  Geo 缓存
 // ══════════════════════════════════════════════════════════
+
+// specialRegionCodes 将特殊地区代码映射到正确的国家中文名
+var specialRegionCodes = map[string]string{
+	"HK": "中国香港",
+	"TW": "中国台湾",
+	"MO": "中国澳门",
+}
 
 type geoEntry struct {
 	info     *GeoInfo
@@ -633,7 +693,7 @@ func getGeoInfoCached(ip string, cache *GeoCache) (*GeoInfo, error) {
 		host = h
 	}
 	if isPrivateIP(host) {
-		return &GeoInfo{Query: host, Status: "success", ISP: "本地/私有网络"}, nil
+		return &GeoInfo{Query: host, Status: "success", Country: "本地", City: "私有网络"}, nil
 	}
 
 	if cached, ok := cache.Get(host); ok {
@@ -641,27 +701,50 @@ func getGeoInfoCached(ip string, cache *GeoCache) (*GeoInfo, error) {
 		return cached, nil
 	}
 
-	url := fmt.Sprintf(
-		"http://ip-api.com/json/%s?lang=zh-CN&fields=status,country,countryCode,regionName,city,isp,org,query,lat,lon",
-		host,
-	)
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(url)
+	if geoDB == nil || geoDB.db == nil {
+		logger.Warn("MaxMind 数据库未初始化: ip=%s", host)
+		return nil, fmt.Errorf("MaxMind 数据库未初始化")
+	}
+
+	var record maxmindRecord
+	err := geoDB.db.Lookup(net.ParseIP(host), &record)
 	if err != nil {
-		logger.Warn("GeoInfo 查询失败: ip=%s err=%v", host, err)
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var info GeoInfo
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		logger.Warn("GeoInfo 解析失败: ip=%s err=%v", host, err)
+		logger.Warn("MaxMind 查询失败: ip=%s err=%v", host, err)
 		return nil, err
 	}
 
-	logger.Debug("GeoInfo 查询成功: ip=%s isp=%s city=%s", host, info.ISP, info.City)
-	cache.Set(host, &info)
-	return &info, nil
+	info := &GeoInfo{
+		Query:       host,
+		Status:      "success",
+		CountryCode: record.Country.ISOCode,
+		City:        record.City.Names.ZhCN,
+		Lat:         record.Location.Latitude,
+		Lon:         record.Location.Longitude,
+	}
+
+	// 处理特殊地区代码（香港、台湾、澳门）
+	if mappedCountry, ok := specialRegionCodes[record.Country.ISOCode]; ok {
+		info.Country = mappedCountry
+	} else {
+		info.Country = record.Country.Names.ZhCN
+	}
+
+	if len(record.Subdivisions) > 0 {
+		info.RegionName = record.Subdivisions[0].Names.ZhCN
+	}
+	if info.Country == "" {
+		info.Country = "未知"
+	}
+	if info.CountryCode == "" {
+		info.CountryCode = "--"
+	}
+	if info.City == "" {
+		info.City = "未知"
+	}
+
+	logger.Debug("GeoInfo 查询成功: ip=%s country=%s city=%s", host, info.Country, info.City)
+	cache.Set(host, info)
+	return info, nil
 }
 
 func isPrivateIP(s string) bool {
@@ -805,6 +888,14 @@ func main() {
 	logger.Info("Token TTL   : %v", tokenTTL)
 	logger.Info("速率限制    : %d token/min/resolverIP", rateMaxPerIP)
 	logger.Info("Geo 缓存TTL : %v", geoCacheTTL)
+	logger.Info("Geo 数据库  : %s", cfg.GeoDBPath)
+
+	// 初始化 MaxMind GeoLite2 数据库
+	if err := initGeoDB(cfg.GeoDBPath); err != nil {
+		logger.Error("MaxMind 数据库初始化失败: %v", err)
+		os.Exit(1)
+	}
+	defer closeGeoDB()
 
 	store := NewTokenStore()
 	geoCache := NewGeoCache()
